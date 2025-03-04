@@ -22,6 +22,8 @@ NoiseFs = 22050;
 NoiseDur = 2;
 Noise = randn(NoiseFs * NoiseDur, 1); 
 
-IR = [1/3,1/3,1/3];
+IR = lowpass.Numerator;
 output = my_conv(Noise,IR);
 sound(output,NoiseFs);
+
+signalAnalyzer(output)
