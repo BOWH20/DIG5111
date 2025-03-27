@@ -1,4 +1,10 @@
 function interactiveAudioEQ()
+    % Initialize variables that need to be shared with nested functions
+    Fs = [];
+    fc = [];
+    b = [];
+    a = [];
+    
     % Display available filter types
     fprintf('Available filter types:\n');
     fprintf('1. Low Pass Filter (lpf)\n');
@@ -66,7 +72,7 @@ function interactiveAudioEQ()
         end
     end
     
-    % Design the filter using the nested function
+    % Design the filter
     [b, a] = AudioEQFilter(fc, dBgain, Fs, Q, type);
     
     % Display filter coefficients
@@ -82,7 +88,116 @@ function interactiveAudioEQ()
     assignin('base', 'a', a);
     fprintf('Filter coefficients saved to workspace as variables ''b'' and ''a''.\n');
 
-    % Nested function definition
+    % Audio processing section
+    fprintf('\nAudio Processing Options:\n');
+    fprintf('1. Apply to test signal\n');
+    fprintf('2. Apply to audio file\n');
+    choice = input('Choose option (1 or 2): ');
+    
+    switch choice
+        case 1 % Test signal
+            % Generate a test signal
+            duration = 3; % seconds
+            t = 0:1/Fs:duration;
+            test_signal = 0.5*sin(2*pi*500*t) + 0.5*sin(2*pi*fc*t) + 0.3*sin(2*pi*3000*t);
+            
+            % Apply filter
+            filtered_signal = filter(b, a, test_signal);
+            
+            % Plot and play
+            % Create a time window for better visualization
+            window_start = 0; % Start time in seconds
+            window_duration = 0.05; % Window duration in seconds (50ms)
+            window_end = window_start + window_duration;
+            window_samples = (t >= window_start) & (t <= window_end);
+    
+
+
+            figure;
+
+            % Full signal view
+            subplot(2,2,1);
+            plot(t, test_signal);
+            title('Original Signal (Full)');
+            xlabel('Time (s)');
+            ylabel('Amplitude');
+            grid on;
+
+            subplot(2,2,2);
+            plot(t, filtered_signal);
+            title('Filtered Signal (Full)');
+            xlabel('Time (s)');
+            ylabel('Amplitude');
+            grid on;
+
+            % Windowed view
+            subplot(2,2,3);
+            plot(t(window_samples), test_signal(window_samples));
+            title(sprintf('Original Signal (%.0f-%.0f ms)', window_start*1000, window_end*1000));
+            xlabel('Time (s)');
+            ylabel('Amplitude');
+            grid on;
+
+            subplot(2,2,4);
+            plot(t(window_samples), filtered_signal(window_samples));
+            title(sprintf('Filtered Signal (%.0f-%.0f ms)', window_start*1000, window_end*1000));
+            xlabel('Time (s)');
+            ylabel('Amplitude');
+            grid on;
+            
+            % Adjust figure size for better viewing
+            set(gcf, 'Position', [100 100 1000 800]);
+
+            soundsc(test_signal, Fs); 
+            pause(duration+1);
+            soundsc(filtered_signal, Fs);
+
+        case 2 % Real audio file
+            [filename, pathname] = uigetfile({'*.wav;*.mp3;*.ogg;*.flac','Audio Files'});
+            if filename == 0
+                fprintf('No file selected.\n');
+                return;
+            end
+            
+            % Read audio file
+            [y, Fs_audio] = audioread(fullfile(pathname, filename));
+            
+            % Check if sampling rates match
+            if Fs_audio ~= Fs
+                fprintf('Warning: Audio sample rate (%.0f Hz) doesn''t match filter rate (%.0f Hz)\n', Fs_audio, Fs);
+                resample_choice = input('Resample audio to filter rate? (y/n): ', 's');
+                if lower(resample_choice) == 'y'
+                    y = resample(y, Fs, Fs_audio);
+                    Fs_audio = Fs;
+                end
+            end
+            
+            % Apply filter (handle stereo/mono)
+            if size(y,2) == 2 % Stereo
+                filtered_audio = [filter(b, a, y(:,1)), filter(b, a, y(:,2))];
+            else % Mono
+                filtered_audio = filter(b, a, y);
+            end
+            
+            % Normalize to prevent clipping
+            filtered_audio = filtered_audio/max(abs(filtered_audio(:)));
+            
+            % Play and save options
+            soundsc(filtered_audio, Fs_audio);
+            
+            save_choice = input('Save filtered audio? (y/n): ', 's');
+            if lower(save_choice) == 'y'
+                [~,name,ext] = fileparts(filename);
+                newname = [name '_filtered' ext];
+                audiowrite(newname, filtered_audio, Fs_audio);
+                fprintf('Saved as %s\n', newname);
+            end
+            
+        otherwise
+            fprintf('Invalid choice.\n');
+    end
+
+    % Nested filter design function
     function [b, a] = AudioEQFilter(fc, dBgain, Fs, Q, type)
         % Convert inputs to radians
         omega = 2 * pi * fc / Fs;
@@ -95,9 +210,6 @@ function interactiveAudioEQ()
         % alpha factor
         alpha = sin_omega / (2 * Q);
         
-        % For shelf filters
-        beta = sqrt(A) / Q;
-
         % Initialize coefficients
         b = [0 0 0];
         a = [0 0 0];
@@ -129,7 +241,7 @@ function interactiveAudioEQ()
                 a(3) = 1 - alpha;
                 
             case 'bpfq'
-                alpha = sin_omega * sinh( log(2)/2 * Q * omega/sin_omega ); % Constant Q
+                alpha = sin_omega * sinh( log(2)/2 * Q * omega/sin_omega );
                 b(1) = sin_omega/2;
                 b(2) = 0;
                 b(3) = -sin_omega/2;
@@ -163,21 +275,21 @@ function interactiveAudioEQ()
                 
             case 'lowshelf'
                 sqrtA = sqrt(A);
-                b(1) =    A*( (A+1) - (A-1)*cos_omega + 2*sqrtA*alpha );
-                b(2) =  2*A*( (A-1) - (A+1)*cos_omega );
-                b(3) =    A*( (A+1) - (A-1)*cos_omega - 2*sqrtA*alpha );
-                a(1) =        (A+1) + (A-1)*cos_omega + 2*sqrtA*alpha;
-                a(2) =   -2*( (A-1) + (A+1)*cos_omega );
-                a(3) =        (A+1) + (A-1)*cos_omega - 2*sqrtA*alpha;
+                b(1) = A*((A+1) - (A-1)*cos_omega + 2*sqrtA*alpha);
+                b(2) = 2*A*((A-1) - (A+1)*cos_omega);
+                b(3) = A*((A+1) - (A-1)*cos_omega - 2*sqrtA*alpha);
+                a(1) = (A+1) + (A-1)*cos_omega + 2*sqrtA*alpha;
+                a(2) = -2*((A-1) + (A+1)*cos_omega);
+                a(3) = (A+1) + (A-1)*cos_omega - 2*sqrtA*alpha;
                 
             case 'highshelf'
                 sqrtA = sqrt(A);
-                b(1) =    A*( (A+1) + (A-1)*cos_omega + 2*sqrtA*alpha );
-                b(2) = -2*A*( (A-1) + (A+1)*cos_omega );
-                b(3) =    A*( (A+1) + (A-1)*cos_omega - 2*sqrtA*alpha );
-                a(1) =        (A+1) - (A-1)*cos_omega + 2*sqrtA*alpha;
-                a(2) =    2*( (A-1) - (A+1)*cos_omega );
-                a(3) =        (A+1) - (A-1)*cos_omega - 2*sqrtA*alpha;
+                b(1) = A*((A+1) + (A-1)*cos_omega + 2*sqrtA*alpha);
+                b(2) = -2*A*((A-1) + (A+1)*cos_omega);
+                b(3) = A*((A+1) + (A-1)*cos_omega - 2*sqrtA*alpha);
+                a(1) = (A+1) - (A-1)*cos_omega + 2*sqrtA*alpha;
+                a(2) = 2*((A-1) - (A+1)*cos_omega);
+                a(3) = (A+1) - (A-1)*cos_omega - 2*sqrtA*alpha;
                 
             otherwise
                 error('Unknown filter type');

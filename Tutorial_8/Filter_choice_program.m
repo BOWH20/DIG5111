@@ -110,8 +110,8 @@ Fs = 4000;        % Sampling rate
 Q = 0.909;        % Quality factor
 
 
-% Example: Low Pass Filter
-[b, a] = AudioEQFilter(fc, dBgain, Fs, Q, 'peakingeq');
+
+[b, a] = AudioEQFilter(fc, dBgain, Fs, Q, 'notch');
 
 % Visualize:
 close all;
