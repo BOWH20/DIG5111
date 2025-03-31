@@ -1,138 +1,145 @@
-%% MATLAB Starter Code for Image Source Method (ISM)
-% This script generates a room impulse response using the Image Source Method.
-% It is intended as a starting point for your DSP Assessment.
-%
-% Key Features:
-%   1. Define a custom cuboid room (length, width, height).
-%   2. Specify positions for the sound source and receiver.
-%   3. Compute reflections up to a user-defined reflection order.
-%   4. Include placeholders to incorporate absorption coefficients for each room surface.
-%   5. Plot the resulting impulse response.
-%   6. Provide a basic framework for later convolution with an audio signal.
-%
-% You are encouraged to expand the code (e.g., to include higher-order reflections
-% or frequency-dependent absorption coefficients) by modifying the indicated sections.
+%% Room Impulse Response with Surface-Specific Materials
+clear all; close all; clc;
 
-%% 1. Parameter Definition
+%% 1. Room and Simulation Parameters
 % Room dimensions (meters)
 room_length = 10;    % Length in x-direction
 room_width  = 7;     % Width in y-direction
 room_height = 3;     % Height in z-direction
 
-% Sound source and receiver (listener) positions [x, y, z] in meters
+% Sound source and receiver positions [x, y, z] in meters
 src_pos = [3, 4, 1.5];   % Source position
 rec_pos = [7, 2, 1.5];   % Receiver position
 
-% Sampling parameters and speed of sound
+% Sampling parameters
 fs = 44100;          % Sampling frequency in Hz
 c  = 343;            % Speed of sound in m/s
+max_order = 10;      % Maximum reflection order
+ir_duration = 3.0;   % Impulse response duration (seconds)
+N = round(fs * ir_duration); % Number of samples
 
-% Maximum reflection order (i.e. include reflections from -max_order to max_order in each dimension)
-max_order = 50;
+%% 2. Material Definitions
+% Frequency bands: [125Hz, 250Hz, 500Hz, 1kHz, 2kHz, 4kHz]
+materials = struct();
+materials.concrete = [0.01, 0.01, 0.02, 0.02, 0.03, 0.03];
+materials.glass = [0.10, 0.06, 0.04, 0.03, 0.02, 0.02];
+materials.carpet = [0.08, 0.24, 0.57, 0.69, 0.71, 0.73];
+materials.wood = [0.15, 0.11, 0.10, 0.07, 0.06, 0.07];
+materials.fabric = [0.14, 0.35, 0.55, 0.70, 0.70, 0.65];
+materials.plaster = [0.14, 0.10, 0.06, 0.05, 0.04, 0.03];
 
-% Absorption coefficients for surfaces (values between 0 and 1)
-% These represent the fraction of energy absorbed at each surface.
-% For now, we use a uniform absorption coefficient.
-% --- Students: Replace the following with surface-specific coefficients as desired.
-absorption_wall   = 0.1;   % Example for left/right and front/back walls
-absorption_floor  = 0.1;   % Example for floor
-absorption_ceiling= 0.2;   % Example for ceiling
-%
-% For simplicity, we use a single uniform absorption value.
-uniform_absorption = 0.05;  % (Placeholder value)
-% Reflection coefficient per reflection (simple model):
-reflection_coeff_single = 1 - uniform_absorption; 
-% Note: In a more detailed model, you might compute the reflection coefficient 
-% as the square root of (1 - absorption) to account for energy conservation.
+%% 3. User Material Assignment
+surface_materials = struct();
+surface_materials.left_wall = 'concrete';
+surface_materials.right_wall = 'concrete';
+surface_materials.front_wall = 'glass';
+surface_materials.back_wall = 'wood';
+surface_materials.floor = 'carpet';
+surface_materials.ceiling = 'plaster';
 
-% Impulse response duration (seconds)
-ir_duration = 3.0;  
-N = round(fs * ir_duration);    % Number of samples in the IR
-h = zeros(N, 1);                % Preallocate the impulse response vector
+ %Optional interactive material selection (uncomment to use)
+ fprintf('Assign materials to surfaces:\n');
+ surfaces = {'left_wall', 'right_wall', 'front_wall', 'back_wall', 'floor', 'ceiling'};
+ material_names = fieldnames(materials);
+ 
+ for i = 1:length(surfaces)
+     fprintf('\nSurface: %s\n', surfaces{i});
+     fprintf('Available materials:\n');
+     for j = 1:length(material_names)
+         fprintf('%d. %s\n', j, material_names{j});
+     end
+     choice = input(sprintf('Choose material for %s (1-%d): ', surfaces{i}, length(material_names)));
+     surface_materials.(surfaces{i}) = material_names{choice};
+ end
 
-%% 2. Image Source Computation and IR Construction
-% Loop over reflection orders in each spatial dimension.
-% The image source method creates virtual sources by “mirroring” the actual source.
-% For each axis, the image source coordinate is computed as follows:
-%   - If the reflection order (n) is even:  img_coord = n*room_dim + src_coord
-%   - If odd:                         img_coord = n*room_dim + (room_dim - src_coord)
-%
-% The total number of reflections for a given image is the sum of the absolute
-% values of the reflection orders in x, y, and z. This count is used to scale
-% the amplitude (via the reflection coefficients) and to mimic energy loss.
+% Extract absorption coefficients
+alpha_left  = materials.(surface_materials.left_wall);
+alpha_right = materials.(surface_materials.right_wall);
+alpha_front = materials.(surface_materials.front_wall);
+alpha_back  = materials.(surface_materials.back_wall);
+alpha_floor = materials.(surface_materials.floor);
+alpha_ceiling = materials.(surface_materials.ceiling);
 
-for nx = -max_order:max_order
-    % Compute image source x-coordinate
-    if mod(nx,2) == 0
-        img_x = src_pos(1) + nx * room_length;
-    else
-        img_x = (room_length - src_pos(1)) + nx * room_length;
-    end
+%% 4. Frequency-Dependent ISM Calculation
+freq_bands = [125, 250, 500, 1000, 2000, 4000]; % Hz
+h_freq = zeros(N, length(freq_bands)); % Frequency-dependent IRs
+
+for f = 1:length(freq_bands)
+    h = zeros(N, 1); % Initialize impulse response for this frequency
     
-    for ny = -max_order:max_order
-        % Compute image source y-coordinate
-        if mod(ny,2) == 0
-            img_y = src_pos(2) + ny * room_width;
+    for nx = -max_order:max_order
+        % Compute image source x-coordinate
+        if mod(nx, 2) == 0
+            img_x = src_pos(1) + nx * room_length;
         else
-            img_y = (room_width - src_pos(2)) + ny * room_width;
+            img_x = (room_length - src_pos(1)) + nx * room_length;
         end
         
-        for nz = -max_order:max_order
-            % Compute image source z-coordinate
-            if mod(nz,2) == 0
-                img_z = src_pos(3) + nz * room_height;
+        for ny = -max_order:max_order
+            % Compute image source y-coordinate
+            if mod(ny, 2) == 0
+                img_y = src_pos(2) + ny * room_width;
             else
-                img_z = (room_height - src_pos(3)) + nz * room_height;
+                img_y = (room_width - src_pos(2)) + ny * room_width;
             end
             
-            % Compute the Euclidean distance from the image source to the receiver
-            distance = sqrt((img_x - rec_pos(1))^2 + (img_y - rec_pos(2))^2 + (img_z - rec_pos(3))^2);
-            
-            % Compute the propagation delay in seconds and convert to a sample index
-            time_delay = distance / c;
-            sample_delay = round(time_delay * fs) + 1;  % +1 for MATLAB 1-indexing
-            
-            % Count the total number of reflections from all three dimensions
-            num_reflections = abs(nx) + abs(ny) + abs(nz);
-            
-            % Compute the overall reflection coefficient for this image source.
-            % --- Students: Modify this section to apply surface-specific absorption.
-            % For example, you could assign different reflection coefficients depending on
-            % which wall (left/right, front/back, floor/ceiling) was involved in the reflection.
-            total_reflection_coeff = reflection_coeff_single^num_reflections;
-            
-            % Attenuation due to spherical spreading (inverse of distance)
-            attenuation = 1 / distance;
-            
-            % Add the contribution from this image source to the impulse response,
-            % if the computed sample delay is within the impulse response length.
-            if sample_delay <= N
-                h(sample_delay) = h(sample_delay) + total_reflection_coeff * attenuation;
+            for nz = -max_order:max_order
+                % Compute image source z-coordinate
+                if mod(nz, 2) == 0
+                    img_z = src_pos(3) + nz * room_height;
+                else
+                    img_z = (room_height - src_pos(3)) + nz * room_height;
+                end
+                
+                % Distance and time delay
+                distance = sqrt((img_x-rec_pos(1))^2 + (img_y-rec_pos(2))^2 + (img_z-rec_pos(3))^2);
+                sample_delay = round((distance/c) * fs) + 1;
+                
+                % Surface-dependent reflection coefficient
+                reflection_coeff = ...
+                    (1 - alpha_left(f))^abs(nx) * ...    % Left wall
+                    (1 - alpha_right(f))^abs(nx) * ...   % Right wall
+                    (1 - alpha_front(f))^abs(ny) * ...   % Front wall
+                    (1 - alpha_back(f))^abs(ny) * ...    % Back wall
+                    (1 - alpha_floor(f))^max(0,nz) * ... % Floor
+                    (1 - alpha_ceiling(f))^max(0,-nz);  % Ceiling
+                
+                % Add to impulse response
+                if sample_delay <= N
+                    h(sample_delay) = h(sample_delay) + reflection_coeff * (1/distance);
+                end
             end
         end
     end
+    
+    h_freq(:,f) = h; % Store frequency band IR
 end
 
-%% 3. Plot the Impulse Response
-time_axis = (0:N-1) / fs;  % Time vector in seconds
+%% 5. Combine Frequency Bands
+% Simple weighted sum (replace with proper filtering for better accuracy)
+h_combined = sum(h_freq, 2);
+
+%% 6. Normalize and Plot
+h_combined = h_combined/max(abs(h_combined)); % Normalize
+
+% Plot impulse response
 figure;
-stem(time_axis, h, 'Marker', 'none');
+t = (0:N-1)/fs;
+plot(t, h_combined);
 xlabel('Time (s)');
 ylabel('Amplitude');
-title('Room Impulse Response using Image Source Method');
+title('Room Impulse Response with Material-Specific Absorption');
 grid on;
 
-%% 4. Using the Impulse Response for Convolution Reverb
-% The generated impulse response (vector h) can now be used to apply convolution
-% reverb to an audio signal.
-% Example (uncomment and modify as needed):
-%
-%   [audio, fs_audio] = audioread('your_audio_file.wav');
-%   audio_reverberated = conv(audio, h);
-%   soundsc(audio_reverberated, fs);
-%
-% Students can expand this section to include additional processing, such as
-% normalizing the impulse response, using frequency-dependent absorption, or
-% implementing higher-order reflections.
+% Plot frequency response
+[H, freq] = freqz(h_combined, 1, 2048, fs);
+figure;
+semilogx(freq, 20*log10(abs(H)));
+xlabel('Frequency (Hz)');
+ylabel('Magnitude (dB)');
+title('Frequency Response of Room IR');
+grid on;
+xlim([20 20000]);
 
-%% End of Script
+%% 7. Save IR (optional)
+% audiowrite('room_ir.wav', h_combined, fs);
