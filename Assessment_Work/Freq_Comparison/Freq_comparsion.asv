@@ -1,0 +1,179 @@
+% MATLAB Script: Compare Magnitude Spectra with User-Defined Frequency Range
+% This script allows the user to select two audio files, computes their FFTs,
+% converts the magnitudes to decibels, and displays the magnitude spectra using a
+% semilogarithmic frequency axis. Before plotting, the user is prompted to
+% choose the desired frequency range for the display.
+
+%% Select and Load the First Audio File
+[file1, path1] = uigetfile({'*.wav;*.mp3;*.flac', 'Audio Files (*.wav, *.mp3, *.flac)'}, ...
+    'Select the First Audio File');
+if isequal(file1, 0)
+    disp('No file selected for the first audio. Exiting script.');
+    return;
+else
+    fullFilePath1 = fullfile(path1, file1);
+    [y1, fs1] = audioread(fullFilePath1);
+    fprintf('Loaded %s with a sample rate of %d Hz.\n', file1, fs1);
+end
+
+% Convert stereo to mono if necessary
+if size(y1, 2) > 1
+    y1 = mean(y1, 2);
+end
+
+%% Select and Load the Second Audio File
+[file2, path2] = uigetfile({'*.wav;*.mp3;*.flac', 'Audio Files (*.wav, *.mp3, *.flac)'}, ...
+    'Select the Second Audio File');
+if isequal(file2, 0)
+    disp('No file selected for the second audio. Exiting script.');
+    return;
+else
+    fullFilePath2 = fullfile(path2, file2);
+    [y2, fs2] = audioread(fullFilePath2);
+    fprintf('Loaded %s with a sample rate of %d Hz.\n', file2, fs2);
+end
+
+% Convert stereo to mono if necessary
+if size(y2, 2) > 1
+    y2 = mean(y2, 2);
+end
+
+%% Compute FFT and Magnitude Spectrum for the First Audio File
+N1 = length(y1);
+Y1 = fft(y1);
+halfN1 = floor(N1 / 2);
+magY1 = abs(Y1(1:halfN1));
+f1 = (0:halfN1-1) * (fs1 / N1);  % Frequency axis from 0 Hz to approximately fs1/2
+
+%% Compute FFT and Magnitude Spectrum for the Second Audio File
+N2 = length(y2);
+Y2 = fft(y2);
+halfN2 = floor(N2 / 2);
+magY2 = abs(Y2(1:halfN2));
+f2 = (0:halfN2-1) * (fs2 / N2);  % Frequency axis from 0 Hz to approximately fs2/2
+
+%% Prepare Data for a Logarithmic Frequency Plot
+% Remove the DC component (0 Hz) to avoid log scale issues.
+f1_log = f1(2:end);
+magY1_db = 20 * log10(magY1(2:end));
+f2_log = f2(2:end);
+magY2_db = 20 * log10(magY2(2:end));
+
+%% Determine the Maximum Common Frequency for Comparison
+% Use the lower Nyquist frequency of the two files.
+common_max_freq = min(fs1, fs2) / 2;
+
+%% Prompt the User to Choose the Frequency Range to Display
+prompt = {'Enter the lower frequency limit (Hz):', 'Enter the upper frequency limit (Hz):'};
+dlgtitle = 'Specify Frequency Range for Display';
+dims = [1 50];
+% Set default lower limit to 20 Hz (or the minimum value in our data) and upper limit to the common maximum.
+defaultLower = num2str(max(20, f1_log(1)));
+defaultUpper = num2str(common_max_freq);
+definput = {defaultLower, defaultUpper};
+answer = inputdlg(prompt, dlgtitle, dims, definput);
+
+if isempty(answer)
+    % If the user cancels the prompt, use the entire common frequency range.
+    freq_lower = f1_log(1);
+    freq_upper = common_max_freq;
+else
+    freq_lower = str2double(answer{1});
+    freq_upper = str2double(answer{2});
+    
+    % Validate the input: ensure that the lower limit is positive, lower than upper,
+    % and that the upper limit does not exceed the common maximum frequency.
+    if isnan(freq_lower) || isnan(freq_upper) || freq_lower < f1_log(1) || ...
+            freq_upper > common_max_freq || freq_lower >= freq_upper
+        warning('Invalid frequency range input. Using default range from %.2f Hz to %.2f Hz.', ...
+            f1_log(1), common_max_freq);
+        freq_lower = f1_log(1);
+        freq_upper = common_max_freq;
+    end
+end
+
+%% Plot the Magnitude Spectra Using Semilogarithmic Frequency Axis
+figure;
+
+subplot(2, 1, 1);
+semilogx(f1_log, magY1_db, 'LineWidth', 1.2);
+title(['Magnitude Spectrum (dB) of ', file1]);
+xlabel('Frequency (Hz)');
+ylabel('Magnitude (dB)');
+grid on;
+xlim([freq_lower, freq_upper]);
+ax = gca;
+ax.XAxis.Exponent = 0;
+
+subplot(2, 1, 2);
+semilogx(f2_log, magY2_db, 'LineWidth', 1.2);
+title(['Magnitude Spectrum (dB) of ', file2]);
+xlabel('Frequency (Hz)');
+ylabel('Magnitude (dB)');
+grid on;
+xlim([freq_lower, freq_upper]);
+ax = gca;
+ax.XAxis.Exponent = 0;
+
+%% Compute Phase Spectra (unwrapped, excluding the DC component)
+phaseY1 = unwrap(angle(Y1(2:halfN1)));
+phaseY2 = unwrap(angle(Y2(2:halfN2)));
+
+%% Plot Phase Spectra in a New Figure (Displayed Separately)
+figure;
+
+% Phase Spectrum for the First Audio File
+subplot(1, 2, 1);
+semilogx(f1_log, phaseY1, 'LineWidth', 1.2);
+xlabel('Frequency (Hz)');
+ylabel('Phase (radians)');
+title(['Phase Spectrum of ', file1]);
+grid on;
+xlim([freq_lower, freq_upper]);
+xtickformat('%.0f');  % Display frequency ticks as plain numbers
+
+% Phase Spectrum for the Second Audio File
+subplot(1, 2, 2);
+semilogx(f2_log, phaseY2, 'LineWidth', 1.2);
+xlabel('Frequency (Hz)');
+ylabel('Phase (radians)');
+title(['Phase Spectrum of ', file2]);
+grid on;
+xlim([freq_lower, freq_upper]);
+xtickformat('%.0f');
+
+%% Time-Frequency Analysis: Spectrogram for Each Signal
+% Adjust spectrogram parameters as needed:
+%   - window_length: controls time resolution (e.g., 50 ms)
+%   - noverlap: overlap between segments (e.g., 25 ms)
+%   - nfft: number of FFT points which controls frequency resolution.
+
+% For the first audio file:
+window_length1 = round(0.05 * fs1);   % e.g., 50 ms window
+noverlap1 = round(0.025 * fs1);         % e.g., 25 ms overlap
+nfft1 = 1024;                         % FFT points (change as needed)
+
+% For the second audio file:
+window_length2 = round(0.05 * fs2);   % e.g., 50 ms window
+noverlap2 = round(0.025 * fs2);         % e.g., 25 ms overlap
+nfft2 = 1024;                         % FFT points (change as needed)
+
+figure;
+
+% Spectrogram for the first audio signal
+subplot(2,1,1);
+spectrogram(y1, window_length1, noverlap1, nfft1, fs1, 'yaxis');
+title(['Spectrogram of ', file1]);
+xlabel('Time (s)');
+ylabel('Frequency (kHz)');
+colorbar;  % Displays the color scale indicating power
+
+
+% Spectrogram for the second audio signal
+subplot(2,1,2);
+spectrogram(y2, window_length2, noverlap2, nfft2, fs2, 'yaxis');
+title(['Spectrogram of ', file2]);
+xlabel('Time (s)');
+ylabel('Frequency (kHz)');
+colorbar;  % Displays the color scale indicating power
+

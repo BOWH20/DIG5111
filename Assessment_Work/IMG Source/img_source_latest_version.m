@@ -210,6 +210,12 @@ parfor f_idx = 1:length(new_freq_bands)
         attenuations = 1 ./ chunk_distances;
         contributions = R_total(valid) .* attenuations;
         
+                % Air absorption (dB/m) - adjust coefficients as needed
+        air_absorption_db = 0.005 * (current_freq/1000).^1.5; % More HF damping
+        air_absorption_linear = 10.^(-air_absorption_db .* chunk_distances / 20);
+        contributions = contributions .* air_absorption_linear;
+
+
         % Filter valid delays
         valid_delays = sample_delays <= N & sample_delays > 0;
         if ~any(valid_delays)
@@ -327,7 +333,7 @@ if max(abs(mixed_signal)) > 1
     mixed_signal = mixed_signal / max(abs(mixed_signal));
 end
 
-%% Plotting
+%% Enhanced Plotting
 figure('Position', [100, 100, 900, 900]);
 plot_duration = min(1, N/fs); % Show first second or less
 
